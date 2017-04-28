@@ -31,6 +31,7 @@
 #define ID_UV800    0xd874
 #define ID_THN129   0xcc43  // THN129 Temp only
 #define ID_BTHGN129 0x5d53  // Baro, Temp, Hygro sensor
+#define ID_CM113A   0xFB    // Cent-a-meter, OWL CM113, Electrisave, etc - 1 offset from sensor_id
 
 float get_os_temperature(unsigned char *message, unsigned int sensor_id) {
   // sensor ID included  to support sensors with temp in different position
@@ -193,14 +194,12 @@ static int oregon_scientific_v2_1_parser(bitbuffer_t *bitbuffer) {
       unsigned int mask     = (unsigned int) (0xffff0000>>pattern_index);
       unsigned int pattern  = (unsigned int)(0x55990000>>pattern_index);
       unsigned int pattern2 = (unsigned int)(0xaa990000>>pattern_index);
-
-      if(debug_output) {
-        fprintf(stdout, "OS v2.1 sync byte search - test_val=%08x pattern=%08x  mask=%08x\n", sync_test_val, pattern, mask);
-      }
+      unsigned int pattern3 = (unsigned int)(0x66650000>>pattern_index);
 
       if (((sync_test_val & mask) == pattern) ||
-          ((sync_test_val & mask) == pattern2)) {
-
+          ((sync_test_val & mask) == pattern2)
+          || ((sync_test_val & mask) == pattern3)
+       ) {
         //  Found sync byte - start working on decoding the stream data.
         // pattern_index indicates  where sync nibble starts, so now we can find the start of the payload
         int start_byte = 5 + (pattern_index>>3);
@@ -224,7 +223,8 @@ static int oregon_scientific_v2_1_parser(bitbuffer_t *bitbuffer) {
               // copy every other bit from source stream to dest packet
               msg[dest_bit>>3] |= (((bb[0][i] & (0x80 >> j)) >> (7-j)) << (7-(dest_bit & 0x07)));
 
-              //fprintf(stdout,"i=%d j=%d dest_bit=%02x bb=%02x msg=%02x\n",i, j, dest_bit, bb[0][i], msg[dest_bit>>3]);
+           //   fprintf(stdout,"i=%d j=%d dest_bit=%02x bb=%02x msg=%02x\n",i, j, dest_bit, bb[0][i], msg[dest_bit>>3]);
+
               if ((dest_bit & 0x07) == 0x07) {
                 // after assembling each dest byte, flip bits in each nibble to convert from lsb to msb bit ordering
                 int k = (dest_bit>>3);
@@ -435,10 +435,159 @@ static int oregon_scientific_v2_1_parser(bitbuffer_t *bitbuffer) {
       //}
 
       return 1;
-    }else if (num_valid_v2_bits > 16) {
-      if(debug_output) {
+
+    } else if ( msg[9] == ID_CM113A ) { // CM113
+
+		if ( debug_output ) {
+			fprintf(stdout, "Packet:  "); for (i=0 ; i<19 ; i++) fprintf(stdout, "   %02d    ", i); fprintf(stdout,"\n");
+			fprintf(stdout, "Message: "); for (i=0 ; i<19 ; i++) fprintf(stdout, "   %02x    ", msg[i]); fprintf(stdout,"\n");
+		
+			fprintf( stdout, "Message: " );
+			for (i=0 ; i<19 ; i++) {
+				fprintf(stdout, "%c%c%c%c%c%c%c%c ", ( msg[i] & 0x80 ? '1' : '0'), \
+					( msg[i] & 0x40 ? '1' : '0'), \
+					( msg[i] & 0x20 ? '1' : '0'), \
+					( msg[i] & 0x10 ? '1' : '0'), \
+					( msg[i] & 0x08 ? '1' : '0'), \
+					( msg[i] & 0x04 ? '1' : '0'), \
+					( msg[i] & 0x02 ? '1' : '0'), \
+					( msg[i] & 0x01 ? '1' : '0') );
+			}
+			fprintf(stdout,"\n");
+		}
+
+        int k;
+        for (k=0; k<BITBUF_COLS;k++) {  // Reverse nibbles
+            msg[k] = (msg[k] & 0xF0) >> 4 |  (msg[k] & 0x0F) << 4;
+        }   
+
+     if ( debug_output ) {
+      	fprintf( stdout, "MessageR " );
+		for (i=0 ; i<19 ; i++) {
+			fprintf(stdout, "%c%c%c%c%c%c%c%c ", ( msg[i] & 0x80 ? '1' : '0'), \
+				( msg[i] & 0x40 ? '1' : '0'), \
+				( msg[i] & 0x20 ? '1' : '0'), \
+				( msg[i] & 0x10 ? '1' : '0'), \
+				( msg[i] & 0x08 ? '1' : '0'), \
+				( msg[i] & 0x04 ? '1' : '0'), \
+				( msg[i] & 0x02 ? '1' : '0'), \
+				( msg[i] & 0x01 ? '1' : '0') );
+		}
+		fprintf(stdout,"\n");
+	}
+
+// 00010001 11010100 00000001 00000000 10000000 00000001 01011000 10111100 11111110 10111111 00111010 10000010 00111010 00000000 00000000 00110000 00000000 10001011 00010111 1.2A R
+// 00001001 11010100 00000001 00000000 01100000 00001101 01011010 00000100 11111110 10111111 00111010 10000001 00111010 00000000 00000000 10101100 01000001 10001011 00000000 10.7A R
+//          UniqueID LLLLLLL? CCCCCLLL RRRCCCCC ---RRRRR ******** ******** ---?---? -------- ----??--          LL------ LLLLLLLL CCCCCCCC RRRRRRCC ----RRRR ???????? ????????
+
+			int station_id = ((msg[0] & 0x01) << 8 ) + msg[1];
+
+			// Usage figures are 10bit data spread out
+			int left_A = ( (msg[12] & 0xC0) >> 6 ) + (msg[13] << 2);
+			int left_A_low = (msg[2] >> 1) + ( (msg[3] & 0x7) << 8 );
+
+			int center_A = msg[14] + ( (msg[15] & 0x3) << 8 );
+			int center_A_low = (msg[3] >> 3) + ( (msg[4] & 0x1F) << 5);
+
+			int right_A = (msg[15] >> 2) + ( (msg[16] & 0x0F) << 6 );
+			int right_A_low = (msg[4] >> 5) + ( (msg[5] & 0x3F) << 3 );
+
+			int total_A = left_A + center_A + right_A;
+			int total_A_low = left_A_low + center_A_low + right_A_low;
+
+			if ( debug_output ) {
+				fprintf( stdout, "Station: %x\n", station_id );
+				fprintf( stdout, "Center usage: %.1fA %.1fA\n",  (double)center_A / 10, (double)center_A_low / 10 );
+				fprintf( stdout, "Left usage:   %.1fA %.1fA\n",  (double)left_A / 10,   (double)left_A_low / 10 );
+				fprintf( stdout, "Right usage:  %.1fA %.1fA\n",  (double)right_A / 10,  (double)right_A_low / 10 );
+				fprintf( stdout, "Total usage:  %.1fA %.1fA\n",  (double)total_A / 10,  (double)total_A_low / 10 );
+			}
+
+
+			char debug_string[171] = {0};
+			int  debug_string_len;
+			debug_string_len = 0;
+
+			for (i=0; i<19; i++) {
+				debug_string_len += sprintf(
+					debug_string + debug_string_len,
+					"%c%c%c%c%c%c%c%c ", 
+					( msg[i] & 0x80 ? '1' : '0'), \
+					( msg[i] & 0x40 ? '1' : '0'), \
+					( msg[i] & 0x20 ? '1' : '0'), \
+					( msg[i] & 0x10 ? '1' : '0'), \
+					( msg[i] & 0x08 ? '1' : '0'), \
+					( msg[i] & 0x04 ? '1' : '0'), \
+					( msg[i] & 0x02 ? '1' : '0'), \
+					( msg[i] & 0x01 ? '1' : '0')
+				);
+			}
+
+			// Some basic protection against faulty signals - if the two signal totals don't match, the signal we've read is corrupted.
+			if ( total_A != total_A_low ) {
+				data = data_make(
+					"time",       "",             DATA_STRING, time_str,
+					"brand",      "",             DATA_STRING, "FAULTY",
+					"model",      "",             DATA_STRING, "FAULTY CM113",
+					"id",         "Station ID",   DATA_FORMAT, "%x",    DATA_INT,    station_id,
+					"amp_left",   "Left Usage",   DATA_FORMAT, "%.1fA", DATA_DOUBLE, (double)left_A / 10,
+					"amp_center", "Center Usage", DATA_FORMAT, "%.1fA", DATA_DOUBLE, (double)center_A / 10,
+					"amp_right",  "Right Usage",  DATA_FORMAT, "%.1fA", DATA_DOUBLE, (double)right_A / 10,
+					"amp_total",  "Total Usage",  DATA_FORMAT, "%.1fA", DATA_DOUBLE, (double)total_A / 10,
+
+					"amp_left_low",   "Left Usage Low",   DATA_FORMAT, "%.1fA", DATA_DOUBLE, (double)left_A_low / 10,
+					"amp_center_low", "Center Usage Low", DATA_FORMAT, "%.1fA", DATA_DOUBLE, (double)center_A_low / 10,
+					"amp_right_low",  "Right Usage Low",  DATA_FORMAT, "%.1fA", DATA_DOUBLE, (double)right_A_low / 10,
+					"amp_total_low",  "Total Usage Low",  DATA_FORMAT, "%.1fA", DATA_DOUBLE, (double)total_A_low / 10,
+
+					"watt_230",   "Watt (230v)",  DATA_FORMAT, "%1dW",  DATA_INT,    ( 230 * total_A / 10 ),
+					"data_string", "Raw Data", DATA_STRING, debug_string,
+					NULL
+				);
+				data_acquired_handler(data);
+				return 1;
+//				return 0;
+			}
+
+			data = data_make(
+				"time",       "",             DATA_STRING, time_str,
+				"brand",      "",             DATA_STRING, "OWL",
+				"model",      "",             DATA_STRING, "CM113",
+				"id",         "Station ID",   DATA_FORMAT, "%x",    DATA_INT,    station_id,
+				"amp_left",   "Left Usage",   DATA_FORMAT, "%.1fA", DATA_DOUBLE, (double)left_A / 10,
+				"amp_center", "Center Usage", DATA_FORMAT, "%.1fA", DATA_DOUBLE, (double)center_A / 10,
+				"amp_right",  "Right Usage",  DATA_FORMAT, "%.1fA", DATA_DOUBLE, (double)right_A / 10,
+				"amp_total",  "Total Usage",  DATA_FORMAT, "%.1fA", DATA_DOUBLE, (double)total_A / 10,
+				"watt_230",   "Watt (230v)",  DATA_FORMAT, "%1dW",  DATA_INT,    ( 230 * total_A / 10 ),
+				"data_string", "Raw Data", DATA_STRING, debug_string,
+				NULL
+			);
+			data_acquired_handler(data);
+			return 1;
+
+			// Checksuming time..
+			fprintf( stdout, "Checksums: %d %d %d %d %d\n", msg[6], msg[7], msg[6]+msg[7], msg[6] + (msg[7]<<8), (msg[6] << 8 )+msg[7] );
+
+		/*for(i=0;i<=20;i++){
+			fprintf( stdout, "check %d = %d\n", i, validate_os_checksum(msg, i) );
+		}*/
+
+    } else if (num_valid_v2_bits > 16) {
+      if(1||debug_output) {
         fprintf(stdout, "%d bit message received from unrecognized Oregon Scientific v2.1 sensor with device ID %x.\n", num_valid_v2_bits, sensor_id);
         fprintf(stdout, "Message: "); for (i=0 ; i<20 ; i++) fprintf(stdout, "%02x ", msg[i]); fprintf(stdout,"\n");
+		fprintf( stdout, "Message: " );
+		for (i=0 ; i<19 ; i++) {
+			fprintf(stdout, "%c%c%c%c%c%c%c%c ", ( msg[i] & 0x80 ? '1' : '0'), \
+( msg[i] & 0x40 ? '1' : '0'), \
+( msg[i] & 0x20 ? '1' : '0'), \
+( msg[i] & 0x10 ? '1' : '0'), \
+( msg[i] & 0x08 ? '1' : '0'), \
+( msg[i] & 0x04 ? '1' : '0'), \
+( msg[i] & 0x02 ? '1' : '0'), \
+( msg[i] & 0x01 ? '1' : '0') );
+		}
+		fprintf(stdout,"\n");
       }
     } else {
       if(debug_output) {
@@ -459,6 +608,19 @@ static int oregon_scientific_v2_1_parser(bitbuffer_t *bitbuffer) {
 return 0;
 }
 
+int dd32_binary( int num ) {
+	fprintf(stdout, "%c%c%c%c%c%c%c%c\n", ( num & 0x80 ? '1' : '0'), \
+		( num  & 0x40 ? '1' : '0'), \
+		( num & 0x20 ? '1' : '0'), \
+		( num & 0x10 ? '1' : '0'), \
+		( num & 0x08 ? '1' : '0'), \
+		( num & 0x04 ? '1' : '0'), \
+		( num & 0x02 ? '1' : '0'), \
+		( num & 0x01 ? '1' : '0')
+	);
+	return 0;
+}
+
 static int oregon_scientific_v3_parser(bitbuffer_t *bitbuffer) {
   bitrow_t *bb = bitbuffer->bb;
   data_t *data;
@@ -473,6 +635,12 @@ static int oregon_scientific_v3_parser(bitbuffer_t *bitbuffer) {
     unsigned int sync_test_val = (bb[0][2]<<24) | (bb[0][3]<<16) | (bb[0][4]<<8);
     int dest_bit = 0;
     int pattern_index;
+
+	// If the sync test bits aren't set, abort, no point searching everything.
+	if ( sync_test_val == 0x00 ) {
+		return 0;
+	}
+
     // Could be extra/dropped bits in stream.  Look for sync byte at expected position +/- some bits in either direction
     for(pattern_index=0; pattern_index<16; pattern_index++) {
       unsigned int     mask = (unsigned int)(0xfff00000>>pattern_index);
@@ -480,14 +648,14 @@ static int oregon_scientific_v3_parser(bitbuffer_t *bitbuffer) {
       unsigned int pattern2 = (unsigned int)(0xff500000>>pattern_index);
       unsigned int pattern3 = (unsigned int)(0x00500000>>pattern_index);
       unsigned int pattern4 = (unsigned int)(0x04600000>>pattern_index);
-      //fprintf(stdout, "OS v3 Sync nibble search - test_val=%08x pattern=%08x  mask=%08x\n", sync_test_val, pattern, mask);
+      fprintf(stdout, "OS v3 Sync nibble search - test_val=%08x pattern=%08x pattern2=%08x pattern3=%08x pattern4=%08x mask=%08x\n", sync_test_val, pattern, pattern2, pattern3, pattern4, mask);
       if (((sync_test_val & mask) == pattern)  || ((sync_test_val & mask) == pattern2) ||
           ((sync_test_val & mask) == pattern3) || ((sync_test_val & mask) == pattern4)) {
         // Found sync byte - start working on decoding the stream data.
         // pattern_index indicates  where sync nibble starts, so now we can find the start of the payload
         int start_byte = 3 + (pattern_index>>3);
         int start_bit = (pattern_index+4) & 0x07;
-        //fprintf(stdout, "Oregon Scientific v3 Sync test val %08x ok, starting decode at byte index %d bit %d\n", sync_test_val, start_byte, start_bit);
+        fprintf(stdout, "Oregon Scientific v3 Sync test val %08x ok, starting decode at byte index %d bit %d\n", sync_test_val, start_byte, start_bit);
         j = start_bit;
         for (i=start_byte;i<BITBUF_COLS;i++) {
           while (j<8) {
@@ -671,7 +839,7 @@ return 1;
     }
   }
   else { // Based on first couple of bytes, either corrupt message or something other than an Oregon Scientific v3 message
-    if(debug_output) {
+    if(debug_output>1) {
       if (bb[0][3] != 0) { fprintf(stdout, "\nUnrecognized Msg in v3: "); int i; for (i=0 ; i<BITBUF_COLS ; i++) fprintf(stdout, "%02x ", bb[0][i]); fprintf(stdout,"\n\n"); }
     }
   }
