@@ -271,7 +271,7 @@ static int oregon_scientific_v2_1_parser(bitbuffer_t *bitbuffer) {
       return 1;
     } else if (sensor_id == ID_WGR968) {
       if (validate_os_v2_message(msg, 189, num_valid_v2_bits, 17) == 0) {
-        float quadrant = (((msg[4] &0x0f)*100)+((msg[4]>>4)*10) + ((msg[5]>>4)&0x0f));
+        float quadrant = (((msg[4] &0x0f)*10)+((msg[4]>>4)&0x0f) + (((msg[5]>>4)&0x0f) * 100));
         float avgWindspeed = ((msg[7]>>4)&0x0f) / 10.0F + (msg[7]&0x0f) *1.0F + ((msg[8]>>4)&0x0f) / 10.0F;
         float gustWindspeed = (msg[5]&0x0f) /10.0F + ((msg[6]>>4)&0x0f) *1.0F + (msg[6]&0x0f) / 10.0F;
         data = data_make(
@@ -579,18 +579,6 @@ static int oregon_scientific_v2_1_parser(bitbuffer_t *bitbuffer) {
       if(debug_output) {
         fprintf(stdout, "%d bit message received from unrecognized Oregon Scientific v2.1 sensor with device ID %x.\n", num_valid_v2_bits, sensor_id);
         fprintf(stdout, "Message: "); for (i=0 ; i<20 ; i++) fprintf(stdout, "%02x ", msg[i]); fprintf(stdout,"\n");
-		fprintf( stdout, "Message: " );
-		for (i=0 ; i<19 ; i++) {
-			fprintf(stdout, "%c%c%c%c%c%c%c%c ", ( msg[i] & 0x80 ? '1' : '0'), \
-( msg[i] & 0x40 ? '1' : '0'), \
-( msg[i] & 0x20 ? '1' : '0'), \
-( msg[i] & 0x10 ? '1' : '0'), \
-( msg[i] & 0x08 ? '1' : '0'), \
-( msg[i] & 0x04 ? '1' : '0'), \
-( msg[i] & 0x02 ? '1' : '0'), \
-( msg[i] & 0x01 ? '1' : '0') );
-		}
-		fprintf(stdout,"\n");
       }
     } else {
       if(debug_output) {
@@ -609,19 +597,6 @@ static int oregon_scientific_v2_1_parser(bitbuffer_t *bitbuffer) {
     }
 }
 return 0;
-}
-
-int dd32_binary( int num ) {
-	fprintf(stdout, "%c%c%c%c%c%c%c%c\n", ( num & 0x80 ? '1' : '0'), \
-		( num  & 0x40 ? '1' : '0'), \
-		( num & 0x20 ? '1' : '0'), \
-		( num & 0x10 ? '1' : '0'), \
-		( num & 0x08 ? '1' : '0'), \
-		( num & 0x04 ? '1' : '0'), \
-		( num & 0x02 ? '1' : '0'), \
-		( num & 0x01 ? '1' : '0')
-	);
-	return 0;
 }
 
 static int oregon_scientific_v3_parser(bitbuffer_t *bitbuffer) {
@@ -651,14 +626,14 @@ static int oregon_scientific_v3_parser(bitbuffer_t *bitbuffer) {
       unsigned int pattern2 = (unsigned int)(0xff500000>>pattern_index);
       unsigned int pattern3 = (unsigned int)(0x00500000>>pattern_index);
       unsigned int pattern4 = (unsigned int)(0x04600000>>pattern_index);
-      fprintf(stdout, "OS v3 Sync nibble search - test_val=%08x pattern=%08x pattern2=%08x pattern3=%08x pattern4=%08x mask=%08x\n", sync_test_val, pattern, pattern2, pattern3, pattern4, mask);
+      //fprintf(stdout, "OS v3 Sync nibble search - test_val=%08x pattern=%08x pattern2=%08x pattern3=%08x pattern4=%08x mask=%08x\n", sync_test_val, pattern, pattern2, pattern3, pattern4, mask);
       if (((sync_test_val & mask) == pattern)  || ((sync_test_val & mask) == pattern2) ||
           ((sync_test_val & mask) == pattern3) || ((sync_test_val & mask) == pattern4)) {
         // Found sync byte - start working on decoding the stream data.
         // pattern_index indicates  where sync nibble starts, so now we can find the start of the payload
         int start_byte = 3 + (pattern_index>>3);
         int start_bit = (pattern_index+4) & 0x07;
-        fprintf(stdout, "Oregon Scientific v3 Sync test val %08x ok, starting decode at byte index %d bit %d\n", sync_test_val, start_byte, start_bit);
+        //fprintf(stdout, "Oregon Scientific v3 Sync test val %08x ok, starting decode at byte index %d bit %d\n", sync_test_val, start_byte, start_bit);
         j = start_bit;
         for (i=start_byte;i<BITBUF_COLS;i++) {
           while (j<8) {
