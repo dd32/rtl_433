@@ -77,7 +77,7 @@ static int m_bus_crc_valid(r_device *decoder, const uint8_t *bytes, unsigned crc
     uint16_t crc_calc = ~crc16(bytes, crc_offset, CRC_POLY, 0);
     uint16_t crc_read = (((uint16_t)bytes[crc_offset] << 8) | bytes[crc_offset+1]);
     if (crc_calc != crc_read) {
-        decoder_logf(decoder, 1, __func__, "M-Bus: CRC error: Calculated 0x%0X, Read: 0x%0X", (unsigned)crc_calc, (unsigned)crc_read);
+        decoder_logf(decoder, 1, __func__, "M-Bus: CRC error: Calculated 0x%X, Read: 0x%X", (unsigned)crc_calc, (unsigned)crc_read);
         return 0;
     }
     return 1;
@@ -333,7 +333,7 @@ static data_t *append_val(data_t *data, enum UnitType unit_type, uint8_t value_t
     }
     double fvalue = val * pow10_table[exp];
 
-    snprintf(buffer_val, sizeof(buffer_val), "%.03f %s%s", fvalue, prefix, unit_names[unit_type][2]);
+    snprintf(buffer_val, sizeof(buffer_val), "%.3f %s%s", fvalue, prefix, unit_names[unit_type][2]);
 
     return append_str(data, unit_type, value_type, sn, key_extra, pretty_extra, buffer_val);
 }
