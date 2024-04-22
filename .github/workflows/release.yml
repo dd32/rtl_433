@@ -53,7 +53,7 @@ jobs:
         echo "RELEASE_NAME=Pre-Release ${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
         echo "PRERELEASE=true" >> $GITHUB_ENV
         ./.deploy/gen_nightly_info.sh
-    - uses: softprops/action-gh-release@v1
+    - uses: softprops/action-gh-release@v2
       id: create_release
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
