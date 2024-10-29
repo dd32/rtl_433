@@ -272,6 +272,8 @@
     DECL(fineoffset_wh46) \
     DECL(vevor_7in1) \
     DECL(arexx_ml) \
+    DECL(rosstech_dcu706) \
+    DECL(risco_agility) \
 
     /* Add new decoders here. */
 
