@@ -93,15 +93,15 @@ E.g. use:
 
     cmake -DENABLE_SOAPYSDR=ON ..
 
-::: tip
+:::tip
 If you use CMake older than 3.13 (check `cmake --version`), you need to build using e.g. `mkdir build ; cd build ; cmake .. && cmake --build .`
 :::
 
-::: tip
+:::tip
 In CMake 3.6 or older the OpenSSL search seems broken, you need to use `cmake -DENABLE_OPENSSL=NO ..`
 :::
 
-::: warning
+:::warning
 If you experience trouble with SoapySDR when compiling or running: you likely mixed version 0.7 and version 0.8 headers and libs.
 Purge all SoapySDR packages and source installation from /usr/local.
 Then install only from packages (version 0.7) or only from source (version 0.8).
