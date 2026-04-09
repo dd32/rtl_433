@@ -8,8 +8,11 @@
     the Free Software Foundation; either version 2 of the License, or
     (at your option) any later version.
 */
-/** @fn int code_alarm_frdpc2000_car_remote_decode(r_device *decoder, bitbuffer_t *bitbuffer)
-Code Alarm - Car Remote
+
+#include "decoder.h"
+
+/**
+Code Alarm - Car Remote.
 
 Manufacturer:
 - Code Alarm
@@ -25,7 +28,7 @@ Multiple buttons can be pressed to set multiple button flags.
 
 Data layout:
 
-PPPP uuuu bbbb IIIIIIII uuuu
+    PPPP uuuu bbbb IIIIIIII uuuu
 
 - P: 32 bit Preamble, all 0x00
 - u: 4 bit unknown
@@ -35,11 +38,9 @@ PPPP uuuu bbbb IIIIIIII uuuu
 
 Format string:
 
-PREAMBLE: hhhh UNKNOWN: bbbb BUTTON: bbbb ID: hhhhhhhh bbbbbbbb
+    PREAMBLE: hhhh UNKNOWN: bbbb BUTTON: bbbb ID: hhhhhhhh bbbbbbbb
 
 */
-
-#include "decoder.h"
 
 static int code_alarm_frdpc2000_car_remote_decode(r_device *decoder, bitbuffer_t *bitbuffer)
 {

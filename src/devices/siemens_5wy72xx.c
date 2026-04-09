@@ -8,9 +8,11 @@
     the Free Software Foundation; either version 2 of the License, or
     (at your option) any later version.
 */
-/** @fn int siemens_5wy72xx_car_remote_decode(r_device *decoder, bitbuffer_t *bitbuffer)
-    Siemens 5WY72XX - Car Remote.
-Siemens - Car Remote (315 MHz)
+
+#include "decoder.h"
+
+/**
+Siemens 5WY72XX - Car Remote (315 MHz).
 
 Manufacturer:
 - Siemens
@@ -30,7 +32,7 @@ Data layout:
 
 Data is little endian
 
-PPPP IIIIIIII bbbbbbbb SSSS EEEEEEEE CC
+    PPPP IIIIIIII bbbbbbbb SSSS EEEEEEEE CC
 
 - P: 16 bit preamble (not included in XOR checksum)
 - c: 32 bit ID
@@ -41,11 +43,9 @@ PPPP IIIIIIII bbbbbbbb SSSS EEEEEEEE CC
 
 Format string:
 
-PREAMBLE: hhhh ID: hhhhhhhh BUTTON: bbbbbbbb SEQUENCE: hhhh ENCRYPTED: hhhhhhhh XOR: hh xxxx
+    PREAMBLE: hhhh ID: hhhhhhhh BUTTON: bbbbbbbb SEQUENCE: hhhh ENCRYPTED: hhhhhhhh XOR: hh xxxx
 
 */
-
-#include "decoder.h"
 
 static int siemens_5wy72xx_car_remote_decode(r_device *decoder, bitbuffer_t *bitbuffer)
 {

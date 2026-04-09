@@ -8,8 +8,11 @@
     the Free Software Foundation; either version 2 of the License, or
     (at your option) any later version.
 */
-/** @fn int six_sc_two_car_remote_decode(r_device *decoder, bitbuffer_t *bitbuffer)
-6SC2 - Car Remote (315 MHz)
+
+#include "decoder.h"
+
+/**
+6SC2 - Car Remote (315 MHz).
 
 Manufacturer:
 - Unknown
@@ -29,7 +32,7 @@ Data layout:
 
 Bytes are reflected
 
-PPPP EEEEEEEE bbbb uuuu SSSS CC
+    PPPP EEEEEEEE bbbb uuuu SSSS CC
 
 - P: 16 bit preamble
 - E: 32 bit encrypted
@@ -40,15 +43,16 @@ PPPP EEEEEEEE bbbb uuuu SSSS CC
 
 Format string:
 
-PREAMBLE: hhhh ENCRYPTED: hh hh hh hh BUTTON: bbbb UNKNOWN: bbbb SEQUENCE: hhhh CHECKSUM: hh
+    PREAMBLE: hhhh ENCRYPTED: hh hh hh hh BUTTON: bbbb UNKNOWN: bbbb SEQUENCE: hhhh CHECKSUM: hh
 
 */
-
-#include "decoder.h"
 
 static int six_sc_two_car_remote_decode(r_device *decoder, bitbuffer_t *bitbuffer)
 {
     int row = bitbuffer_find_repeated_row(bitbuffer, 1, 48);
+    if (row < 0) {
+        return DECODE_ABORT_EARLY;
+    }
 
     if (bitbuffer->bits_per_row[row] > 88) {
         return DECODE_ABORT_LENGTH;

@@ -8,8 +8,11 @@
     the Free Software Foundation; either version 2 of the License, or
     (at your option) any later version.
 */
-/** @fn int continental_car_remote_decode(r_device *decoder, bitbuffer_t *bitbuffer)
-Continental - Car Remote (313 MHz)
+
+#include "decoder.h"
+
+/**
+Continental - Car Remote (313 MHz).
 
 Manufacturer:
 - Continental
@@ -31,7 +34,7 @@ Data layout:
 
 The decoder will match on the last 20 bits of the preamble: 0xf0f06
 
-PPPPP IIIIIIII UU bbbb U IIIII EEEEEEEE CC
+    PPPPP IIIIIIII UU bbbb U IIIII EEEEEEEE CC
 
 - P: 20 bit preamble (following a longer wakeup sequence)
 - I: 32 bit remote ID
@@ -43,11 +46,9 @@ PPPPP IIIIIIII UU bbbb U IIIII EEEEEEEE CC
 
 Format string:
 
-PREAMBLE: bbbbbbbb bbbbbbbb bbbb ID: hhhhhhhh UNKNOWN: bbbbbbbb BUTTON: bbbb UNKNOWN: bbbb SEQUENCE: hhhhhh CODE: hhhhhhhhhh CHECKSUM: hh
+    PREAMBLE: bbbbbbbb bbbbbbbb bbbb ID: hhhhhhhh UNKNOWN: bbbbbbbb BUTTON: bbbb UNKNOWN: bbbb SEQUENCE: hhhhhh CODE: hhhhhhhhhh CHECKSUM: hh
 
 */
-
-#include "decoder.h"
 
 static int continental_car_remote_decode(r_device *decoder, bitbuffer_t *bitbuffer)
 {

@@ -8,8 +8,11 @@
     the Free Software Foundation; either version 2 of the License, or
     (at your option) any later version.
 */
-/** @fn int chrysler_car_remote_decode(r_device *decoder, bitbuffer_t *bitbuffer)
-Chrysler - Car Remote (315 MHz)
+
+#include "decoder.h"
+
+/**
+Chrysler - Car Remote (315 MHz).
 
 Manufacturer:
 - Chrysler
@@ -37,7 +40,8 @@ Data layout:
 
 Bytes are inverted and reflected
 
-IIIIIIII bbbb x d xx CC
+    IIIIIIII bbbb x d xx CC
+
 - I: 32 bit remote ID
 - b: 4 bit button code
 - x: 1 bit unknown
@@ -47,11 +51,9 @@ IIIIIIII bbbb x d xx CC
 
 Format string:
 
-ID: hhhhhhhh BUTTON: bbbb x MULTIPLE: b xx CHECKSUM: bbbbbbbb
+    ID: hhhhhhhh BUTTON: bbbb x MULTIPLE: b xx CHECKSUM: bbbbbbbb
 
 */
-
-#include "decoder.h"
 
 static int chrysler_car_remote_decode(r_device *decoder, bitbuffer_t *bitbuffer)
 {

@@ -8,8 +8,11 @@
     the Free Software Foundation; either version 2 of the License, or
     (at your option) any later version.
 */
-/** @fn int gm_car_remote_decode(r_device *decoder, bitbuffer_t *bitbuffer)
-General Motors - Car Remote (315 MHz)
+
+#include "decoder.h"
+
+/**
+General Motors - Car Remote (315 MHz).
 
 Manufacturer:
 - General Motors
@@ -27,7 +30,7 @@ Pressing both lock and unlock appears to send a fixed code, possibly a PRNG seed
 
 Data layout:
 
-PP xxxx cccc IIIIIIII SSSSSS EEEEEE CC
+    PP xxxx cccc IIIIIIII SSSSSS EEEEEE CC
 
 - P: 8 bit unknown, possibly part of the ID
 - c: 4 bit checksum of button code
@@ -39,11 +42,9 @@ PP xxxx cccc IIIIIIII SSSSSS EEEEEE CC
 
 Format string:
 
-UNKNOWN: bbbbbbbb BUTTON_CHECKSUM: bbbb BUTTON: bbbb ID: hhhhhhhh SEQUENCE: hhhhhh ENCRYPTED: hhhhhh CHECKSUM: hh
+    UNKNOWN: bbbbbbbb BUTTON_CHECKSUM: bbbb BUTTON: bbbb ID: hhhhhhhh SEQUENCE: hhhhhh ENCRYPTED: hhhhhh CHECKSUM: hh
 
 */
-
-#include "decoder.h"
 
 static int gm_car_remote_decode(r_device *decoder, bitbuffer_t *bitbuffer)
 {

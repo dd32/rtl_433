@@ -8,8 +8,11 @@
     the Free Software Foundation; either version 2 of the License, or
     (at your option) any later version.
 */
-/** @fn int nidec_car_remote_decode(r_device *decoder, bitbuffer_t *bitbuffer)
-Nidec - Car Remote (313 MHz)
+
+#include "decoder.h"
+
+/**
+Nidec - Car Remote (313 MHz).
 
 Manufacturer:
 - Nidec
@@ -33,7 +36,7 @@ Bytes are inverted.
 
 The decoder will match on the last 64 bits of the preamble: 0xfffffff0
 
-SSSS IIIIII uuuu bbbb CC
+    SSSS IIIIII uuuu bbbb CC
 
 - I: 16 bit sequence that increments on each code transmitted
 - I: 24 bit remote ID
@@ -43,11 +46,9 @@ SSSS IIIIII uuuu bbbb CC
 
 Format string:
 
-SEQUENCE hhhh ID: hhhhhh UNKNOWN: bbbb BUTTON: bbbb CODE: hhhh
+    SEQUENCE hhhh ID: hhhhhh UNKNOWN: bbbb BUTTON: bbbb CODE: hhhh
 
 */
-
-#include "decoder.h"
 
 static int nidec_car_remote_decode(r_device *decoder, bitbuffer_t *bitbuffer)
 {
