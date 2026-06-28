@@ -16,6 +16,7 @@ add_library(r_433 STATIC
     data.c
     data_tag.c
     decoder_util.c
+    delay_timer.c
     fileformat.c
     http_server.c
     jsmn.c
@@ -37,6 +38,7 @@ add_library(r_433 STATIC
     pulse_detect_fsk.c
     pulse_slicer.c
     r_api.c
+    r_flow.c
     r_util.c
     r_version.c
     raw_output.c
