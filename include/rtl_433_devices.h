@@ -301,7 +301,7 @@
     DECL(geevon_tx19) \
     DECL(wallarge_cltx001) \
     DECL(sainlogic_sa8) \
-    DECL(thermopro_tp862b) \
+    DECL(thermopro_tp86xb) \
     DECL(tpms_airpuxem) \
     DECL(apator_metra_eitn30) \
     DECL(thermopro_tp211b) \
@@ -326,9 +326,50 @@
     DECL(continental_car_remote) \
     DECL(code_alarm_frdpc2000_car_remote) \
     DECL(rfm69_lowpowerlab_moteino) \
+    DECL(shenzhen_wale_wl_th6r) \
+    DECL(ctt_life_power_hybrid) \
+    DECL(tpms_schrader_motorcycle) \
+    DECL(tmps_gear_hive) \
+    DECL(lacrosse_tx22uit) \
+    DECL(lacrosse_tx22uit_ook) \
+    DECL(thermor_a6n_132tx) \
+    DECL(acurite_985) \
+    DECL(honda_keyfob) \
+    DECL(schrader_MRXBC5A4) \
+    DECL(hcs362_pwm) \
+    DECL(hcs362_mc) \
+    DECL(grill_thermometer) \
+    DECL(tr_502msv) \
+    DECL(opel_mokka) \
+    DECL(rfxmeter) \
+    DECL(martec_mplcd) \
+    DECL(netatmo_thw) \
+    DECL(omni) \
+    DECL(elster_power_meter) \
+    DECL(florabest) \
+    DECL(holman_ws5029pwm_ook) \
+    DECL(esun_en2053) \
+    DECL(vivint) \
+    DECL(tpms_smartire) \
+    DECL(dickert_pwm) \
+    DECL(fsl_scoreboard) \
+    DECL(en2058) \
+    DECL(tfa_30_390x) \
+    DECL(watts_wfht_rf) \
+    DECL(govee_h5310) \
+    DECL(govee_h5112) \
+    DECL(ecoeye) \
+    DECL(schrader_NIS315G3) \
+    DECL(fineoffset_wh52) \
+    DECL(tpms_imars_t240) \
+    DECL(tpms_jansite_ty468) \
+    DECL(fineoffset_wh5rb) \
+    DECL(auriol_hg04641a) \
+    DECL(eberle_instat868r1) \
     /* Add new decoders here. */
 
-#define DECL(name) extern r_device name;
+#define DECL(name) extern r_device const name;
+DECL(flex_decoder)
 DEVICES
 #undef DECL
 

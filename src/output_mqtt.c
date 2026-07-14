@@ -16,12 +16,129 @@
 #include "logger.h"
 #include "fatal.h"
 #include "r_util.h"
+#include "string_expand.h"
 
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "mongoose.h"
+
+/* MQTT transmission list */
+
+typedef struct mqtt_msg {
+    char *topic; //!< NULL after QoS 2 release
+    char *msg; //!< NULL after QoS 2 release
+    double timeout;
+    int retries;
+    uint16_t mid;
+} mqtt_msg_t;
+
+/// Dynamically growing list, call list_ensure_size() to alloc elems.
+typedef struct inflight {
+    mqtt_msg_t *elems;
+    size_t size;
+    size_t len;
+} inflight_t;
+
+static void inflight_ensure_size(inflight_t *list, size_t min_size)
+{
+    if (!list->elems || list->size < min_size) {
+        // the input pointer is still valid if reallocation fails
+        void *elems_realloc = realloc(list->elems, min_size * sizeof(*list->elems));
+        if (!elems_realloc) {
+            FATAL_REALLOC("list_ensure_size()");
+        }
+        list->elems = elems_realloc;
+        list->size = min_size;
+    }
+}
+
+static void inflight_add(inflight_t *list, char const *topic, uint16_t mid, char const *msg)
+{
+    if (list->len >= list->size) {
+        inflight_ensure_size(list, list->size < 8 ? 8 : list->size + list->size / 2);
+    }
+
+    char *topic_dup = strdup(topic);
+    if (!topic_dup) {
+        WARN_STRDUP("inflight_add()");
+        return; // this just ignores the error
+    }
+    char *msg_dup = strdup(msg);
+    if (!msg_dup) {
+        WARN_STRDUP("inflight_add()");
+        free(topic_dup);
+        return; // this just ignores the error
+    }
+
+    list->elems[list->len++] = (mqtt_msg_t) {
+            .topic   = topic_dup,
+            .msg     = msg_dup,
+            .timeout = mg_time() + 1.2,
+            .retries = 0,
+            .mid     = mid,
+    };
+}
+
+static void inflight_remove_at(inflight_t *list, size_t idx)
+{
+    if (idx >= list->len) {
+        return; // report error?
+    }
+    free(list->elems[idx].topic);
+    free(list->elems[idx].msg);
+    list->len--;
+    if (list->len > 0) {
+        list->elems[idx] = list->elems[list->len];
+    }
+}
+
+static int inflight_remove(inflight_t *list, uint16_t mid)
+{
+    for (size_t i = 0; i < list->len; ++i) {
+        if (list->elems[i].mid == mid) {
+            inflight_remove_at(list, i);
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+static int inflight_release(inflight_t *list, uint16_t mid)
+{
+    for (size_t i = 0; i < list->len; ++i) {
+        if (list->elems[i].mid == mid) {
+            free(list->elems[i].topic);
+            list->elems[i].topic = NULL;
+
+            free(list->elems[i].msg);
+            list->elems[i].msg = NULL;
+
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+static void inflight_clear(inflight_t *list)
+{
+    for (size_t i = 0; i < list->len; ++i) {
+        free(list->elems[i].topic);
+        free(list->elems[i].msg);
+    }
+    list->len = 0;
+}
+
+static void inflight_free(inflight_t *list)
+{
+    inflight_clear(list);
+    free(list->elems);
+    list->elems = NULL;
+    list->size  = 0;
+}
 
 /* MQTT client abstraction */
 
@@ -36,6 +153,8 @@ typedef struct mqtt_client {
     char client_id[256];
     uint16_t message_id;
     int publish_flags; // MG_MQTT_RETAIN | MG_MQTT_QOS(0)
+    unsigned qos;
+    inflight_t inflight;
 } mqtt_client_t;
 
 char const *mqtt_availability_online  = "online";
@@ -61,6 +180,9 @@ static void mqtt_client_event(struct mg_connection *nc, int ev, void *ev_data)
             if (ctx) {
                 ctx->reconnect_delay = 0;
                 mg_send_mqtt_handshake_opt(nc, ctx->client_id, ctx->mqtt_opts);
+
+                // Send us MG_EV_TIMER event after 500 milliseconds
+                mg_set_timer(ctx->timer, mg_time() + 0.5);
             }
         }
         else {
@@ -86,17 +208,56 @@ static void mqtt_client_event(struct mg_connection *nc, int ev, void *ev_data)
             }
         }
         break;
-    case MG_EV_MQTT_PUBACK:
-        print_logf(LOG_NOTICE, "MQTT", "MQTT Message publishing acknowledged (msg_id: %u)", msg->message_id);
-        break;
+
     case MG_EV_MQTT_SUBACK:
         print_log(LOG_NOTICE, "MQTT", "MQTT Subscription acknowledged.");
         break;
+
     case MG_EV_MQTT_PUBLISH: {
-        print_logf(LOG_NOTICE, "MQTT", "MQTT Incoming message %.*s: %.*s", (int)msg->topic.len,
+        // This is not expected to happen
+        print_logf(LOG_WARNING, "MQTT", "MQTT Incoming message %.*s: %.*s", (int)msg->topic.len,
                 msg->topic.p, (int)msg->payload.len, msg->payload.p);
         break;
     }
+
+    // QoS 1
+    // > Publish message (id)
+    // < Publish acknowledged (id)
+    case MG_EV_MQTT_PUBACK:
+        if (inflight_remove(&ctx->inflight, msg->message_id) >= 0) {
+            print_logf(LOG_DEBUG, "MQTT", "MQTT Message publishing acknowledged (msg_id %u)", msg->message_id);
+        } else {
+            print_logf(LOG_NOTICE, "MQTT", "MQTT Message unknown publishing acknowledged (msg_id %u)", msg->message_id);
+        }
+        break;
+
+    // QoS 2
+    // > Publish message (id)
+    // < Publish received (id)
+    // > Publish release (id)
+    // < Publish complete (id)
+    case MG_EV_MQTT_PUBREC:
+        if (inflight_release(&ctx->inflight, msg->message_id) >= 0) {
+            print_logf(LOG_DEBUG, "MQTT", "MQTT Message publishing received (msg_id %u)", msg->message_id);
+            mg_mqtt_pubrel(ctx->conn, msg->message_id);
+        }
+        else {
+            print_logf(LOG_NOTICE, "MQTT", "MQTT Message unknown publishing received (msg_id %u)", msg->message_id);
+        }
+        break;
+    case MG_EV_MQTT_PUBREL:
+        // This is not expected to happen
+        print_logf(LOG_WARNING, "MQTT", "MQTT Incoming release (msg_id %u)", msg->message_id);
+        break;
+    case MG_EV_MQTT_PUBCOMP:
+        if (inflight_remove(&ctx->inflight, msg->message_id) >= 0) {
+            print_logf(LOG_DEBUG, "MQTT", "MQTT Message publishing complete (msg_id %u)", msg->message_id);
+        }
+        else {
+            print_logf(LOG_NOTICE, "MQTT", "MQTT Message unknown publishing complete (msg_id %u)", msg->message_id);
+        }
+        break;
+
     case MG_EV_CLOSE:
         if (!ctx) {
             break; // shutting down
@@ -129,14 +290,52 @@ static void mqtt_client_timer(struct mg_connection *nc, int ev, void *ev_data)
 
     switch (ev) {
     case MG_EV_TIMER: {
-        // Try to reconnect
-        char const *error_string = NULL;
-        ctx->connect_opts.error_string = &error_string;
-        ctx->conn = mg_connect_opt(nc->mgr, ctx->address, mqtt_client_event, ctx->connect_opts);
-        ctx->connect_opts.error_string = NULL;
         if (!ctx->conn) {
-            print_logf(LOG_WARNING, "MQTT", "MQTT connect (%s) failed%s%s", ctx->address,
-                    error_string ? ": " : "", error_string ? error_string : "");
+            // Try to reconnect
+            char const *error_string = NULL;
+            ctx->connect_opts.error_string = &error_string;
+            ctx->conn = mg_connect_opt(nc->mgr, ctx->address, mqtt_client_event, ctx->connect_opts);
+            ctx->connect_opts.error_string = NULL;
+            if (!ctx->conn) {
+                print_logf(LOG_WARNING, "MQTT", "MQTT connect (%s) failed%s%s", ctx->address,
+                        error_string ? ": " : "", error_string ? error_string : "");
+            }
+        }
+        else {
+            // Process the QoS timer
+            double now  = *(double *)ev_data;
+            double next = mg_time() + 0.5;
+            // fprintf(stderr, "timer event, current time: %.2lf, next timer: %.2lf\n", now, next);
+            mg_set_timer(nc, next); // Send us timer event again after 500 milliseconds
+
+            if (!ctx->conn || !ctx->conn->proto_handler) {
+                break;
+            }
+
+            // check inflight...
+            for (size_t i = 0; i < ctx->inflight.len; ++i) {
+                mqtt_msg_t *elem = &ctx->inflight.elems[i];
+                if (elem->timeout < now) {
+                    if (ctx->qos == 1) {
+                        print_logf(LOG_NOTICE, "MQTT", "MQTT resending (msg_id %u, retry %d)", elem->mid, elem->retries + 1);
+                        mg_mqtt_publish(ctx->conn, elem->topic, elem->mid, ctx->publish_flags | MG_MQTT_DUP, elem->msg, strlen(elem->msg));
+                        elem->timeout = now + 1.2;
+                        elem->retries += 1;
+                    }
+                    else if (elem->topic) { // qos 2, first half
+                        print_logf(LOG_NOTICE, "MQTT", "MQTT resending (msg_id %u, retry %d)", elem->mid, elem->retries + 1);
+                        mg_mqtt_publish(ctx->conn, elem->topic, elem->mid, ctx->publish_flags | MG_MQTT_DUP, elem->msg, strlen(elem->msg));
+                        elem->timeout = now + 1.2;
+                        elem->retries += 1;
+                    }
+                    else { // qos 2, second half
+                        print_logf(LOG_NOTICE, "MQTT", "MQTT reconfirming (msg_id %u, retry %d)", elem->mid, elem->retries + 1);
+                        mg_mqtt_pubrel(ctx->conn, elem->mid);
+                        elem->timeout = now + 1.2;
+                        elem->retries += 1;
+                    }
+                }
+            }
         }
         break;
     }
@@ -149,6 +348,7 @@ static mqtt_client_t *mqtt_client_init(struct mg_mgr *mgr, tls_opts_t *tls_opts,
     if (!ctx)
         FATAL_CALLOC("mqtt_client_init()");
 
+    ctx->qos                 = qos;
     ctx->mqtt_opts.user_name = user;
     ctx->mqtt_opts.password  = pass;
     ctx->mqtt_opts.will_topic = availability;
@@ -217,28 +417,40 @@ static mqtt_client_t *mqtt_client_init(struct mg_mgr *mgr, tls_opts_t *tls_opts,
 
 static void mqtt_client_publish(mqtt_client_t *ctx, char const *topic, char const *str)
 {
+    ctx->message_id++;
+    if (ctx->qos > 0) {
+        inflight_add(&ctx->inflight, topic, ctx->message_id, str);
+        print_logf(LOG_DEBUG, "MQTT", "MQTT publishing: %d (%zu inflight)", ctx->message_id, ctx->inflight.len);
+    }
+
     if (!ctx->conn || !ctx->conn->proto_handler)
         return;
 
-    ctx->message_id++;
     mg_mqtt_publish(ctx->conn, topic, ctx->message_id, ctx->publish_flags, str, strlen(str));
 }
 
 static void mqtt_client_free(mqtt_client_t *ctx)
 {
+    if (ctx && ctx->timer) {
+        mg_set_timer(ctx->timer, 0); // Clear retry timer
+    }
     if (ctx && ctx->conn) {
         ctx->conn->user_data = NULL;
         ctx->conn->flags |= MG_F_CLOSE_IMMEDIATELY;
     }
+    if (ctx) {
+        inflight_free(&ctx->inflight);
+    }
+
     free(ctx);
 }
 
 /* Helper */
 
 /// clean the topic inplace to [-.A-Za-z0-9], esp. not whitespace, +, #, /, $
-static char *mqtt_sanitize_topic(char *topic)
+static char *mqtt_sanitize_topic(char *topic, char *end)
 {
-    for (char *p = topic; *p; ++p)
+    for (char *p = topic; p < end && *p; ++p)
         if (*p != '-' && *p != '.' && (*p < 'A' || *p > 'Z') && (*p < 'a' || *p > 'z') && (*p < '0' || *p > '9'))
             *p = '_';
 
@@ -273,122 +485,6 @@ static void R_API_CALLCONV print_mqtt_array(data_output_t *output, data_array_t 
     *orig = '\0'; // restore topic
 }
 
-static char *append_topic(char *topic, data_t *data)
-{
-    if (data->type == DATA_STRING) {
-        strcpy(topic, data->value.v_ptr); // NOLINT
-        mqtt_sanitize_topic(topic);
-        topic += strlen(data->value.v_ptr);
-    }
-    else if (data->type == DATA_INT) {
-        topic += sprintf(topic, "%d", data->value.v_int);
-    }
-    else {
-        print_logf(LOG_ERROR, __func__, "Can't append data type %d to topic", data->type);
-    }
-
-    return topic;
-}
-
-static char *expand_topic(char *topic, char const *format, data_t *data, char const *hostname)
-{
-    // collect well-known top level keys
-    data_t *data_type    = NULL;
-    data_t *data_model   = NULL;
-    data_t *data_subtype = NULL;
-    data_t *data_channel = NULL;
-    data_t *data_id      = NULL;
-    data_t *data_protocol = NULL;
-    for (data_t *d = data; d; d = d->next) {
-        if (!strcmp(d->key, "type"))
-            data_type = d;
-        else if (!strcmp(d->key, "model"))
-            data_model = d;
-        else if (!strcmp(d->key, "subtype"))
-            data_subtype = d;
-        else if (!strcmp(d->key, "channel"))
-            data_channel = d;
-        else if (!strcmp(d->key, "id"))
-            data_id = d;
-        else if (!strcmp(d->key, "protocol")) // NOTE: needs "-M protocol"
-            data_protocol = d;
-    }
-
-    // consume entire format string
-    while (format && *format) {
-        data_t *data_token  = NULL;
-        char const *string_token = NULL;
-        int leading_slash   = 0;
-        char const *t_start = NULL;
-        char const *t_end   = NULL;
-        char const *d_start = NULL;
-        char const *d_end   = NULL;
-        // copy until '['
-        while (*format && *format != '[')
-            *topic++ = *format++;
-        // skip '['
-        if (!*format)
-            break;
-        ++format;
-        // read slash
-        if (!leading_slash && (*format < 'a' || *format > 'z')) {
-            leading_slash = *format;
-            format++;
-        }
-        // read key until : or ]
-        t_start = t_end = format;
-        while (*format && *format != ':' && *format != ']' && *format != '[')
-            t_end = ++format;
-        // read default until ]
-        if (*format == ':') {
-            d_start = d_end = ++format;
-            while (*format && *format != ']' && *format != '[')
-                d_end = ++format;
-        }
-        // check for proper closing
-        if (*format != ']') {
-            print_log(LOG_FATAL, __func__, "unterminated token");
-            exit(1);
-        }
-        ++format;
-
-        // resolve token
-        if (!strncmp(t_start, "hostname", t_end - t_start))
-            string_token = hostname;
-        else if (!strncmp(t_start, "type", t_end - t_start))
-            data_token = data_type;
-        else if (!strncmp(t_start, "model", t_end - t_start))
-            data_token = data_model;
-        else if (!strncmp(t_start, "subtype", t_end - t_start))
-            data_token = data_subtype;
-        else if (!strncmp(t_start, "channel", t_end - t_start))
-            data_token = data_channel;
-        else if (!strncmp(t_start, "id", t_end - t_start))
-            data_token = data_id;
-        else if (!strncmp(t_start, "protocol", t_end - t_start))
-            data_token = data_protocol;
-        else {
-            print_logf(LOG_FATAL, __func__, "unknown token \"%.*s\"", (int)(t_end - t_start), t_start);
-            exit(1);
-        }
-
-        // append token or default
-        if (!data_token && !string_token && !d_start)
-            continue;
-        if (leading_slash)
-            *topic++ = leading_slash;
-        if (data_token)
-            topic = append_topic(topic, data_token);
-        else if (string_token)
-            topic += sprintf(topic, "%s", string_token);
-        else
-            topic += sprintf(topic, "%.*s", (int)(d_end - d_start), d_start);
-    }
-
-    *topic = '\0';
-    return topic;
-}
-
 // <prefix>[/type][/model][/subtype][/channel][/id]/battery: "OK"|"LOW"
 static void R_API_CALLCONV print_mqtt_data(data_output_t *output, data_t *data, char const *format)
 {
@@ -417,7 +513,7 @@ static void R_API_CALLCONV print_mqtt_data(data_output_t *output, data_t *data, 
                     return; // NOTE: skip output on alloc failure.
                 }
                 data_print_jsons(data, message, message_size);
-                expand_topic(mqtt->topic, mqtt->states, data, mqtt->hostname);
+                expand_topic_string(mqtt->topic, mqtt->states, data, mqtt->hostname, mqtt_sanitize_topic);
                 mqtt_client_publish(mqtt->mqc, mqtt->topic, message);
                 *mqtt->topic = '\0'; // clear topic
                 free(message);
@@ -429,7 +525,7 @@ static void R_API_CALLCONV print_mqtt_data(data_output_t *output, data_t *data, 
         if (mqtt->events) {
             char message[2048]; // we expect the biggest strings to be around 500 bytes.
             data_print_jsons(data, message, sizeof(message));
-            expand_topic(mqtt->topic, mqtt->events, data, mqtt->hostname);
+            expand_topic_string(mqtt->topic, mqtt->events, data, mqtt->hostname, mqtt_sanitize_topic);
             mqtt_client_publish(mqtt->mqc, mqtt->topic, message);
             *mqtt->topic = '\0'; // clear topic
         }
@@ -439,7 +535,7 @@ static void R_API_CALLCONV print_mqtt_data(data_output_t *output, data_t *data, 
             return;
         }
 
-        end = expand_topic(mqtt->topic, mqtt->devices, data, mqtt->hostname);
+        end = expand_topic_string(mqtt->topic, mqtt->devices, data, mqtt->hostname, mqtt_sanitize_topic);
     }
 
     while (data) {
@@ -548,9 +644,9 @@ struct data_output *data_output_mqtt_create(struct mg_mgr *mgr, char *param, cha
     //fprintf(stderr, "Hostname: %s\n", hostname);
 
     // generate a short deterministic client_id to identify this input device on restart
-    uint16_t host_crc = crc16((uint8_t *)mqtt->hostname, strlen(mqtt->hostname), 0x1021, 0xffff);
-    uint16_t devq_crc = crc16((uint8_t *)dev_hint, dev_hint ? strlen(dev_hint) : 0, 0x1021, 0xffff);
-    uint16_t parm_crc = crc16((uint8_t *)param, param ? strlen(param) : 0, 0x1021, 0xffff);
+    uint16_t host_crc = crc16((uint8_t *)mqtt->hostname, (unsigned int)strlen(mqtt->hostname), 0x1021, 0xffff);
+    uint16_t devq_crc = crc16((uint8_t *)dev_hint, dev_hint ? (unsigned int)strlen(dev_hint) : 0, 0x1021, 0xffff);
+    uint16_t parm_crc = crc16((uint8_t *)param, param ? (unsigned int)strlen(param) : 0, 0x1021, 0xffff);
     char client_id[21];
     /// MQTT 3.1.1 specifies that the broker MUST accept clients id's between 1 and 23 characters
     snprintf(client_id, sizeof(client_id), "rtl_433-%04x%04x%04x", host_crc, devq_crc, parm_crc);
