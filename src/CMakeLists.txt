@@ -215,6 +215,7 @@ add_library(r_433 STATIC
     devices/lacrosse_tx34.c
     devices/lacrosse_tx35.c
     devices/lacrosse_wr1.c
+    devices/lacrosse_ws6868.c
     devices/lacrosse_ws7000.c
     devices/lacrossews.c
     devices/lightwave_rf.c
@@ -226,6 +227,7 @@ add_library(r_433 STATIC
     devices/maverick_et73x.c
     devices/maverick_xr30.c
     devices/maverick_xr50.c
+    devices/mcpower_kinetic.c
     devices/mebus.c
     devices/megacode.c
     devices/mic6sc2_car_remote.c

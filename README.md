@@ -462,6 +462,9 @@ See [CONTRIBUTING.md](./docs/CONTRIBUTING.md).
     [371]* Hanwell ML/RL4000-series Radiologger temperature/humidity sensor
     [372]  Elero bidirectional blinds/awning remote (Silent Gliss and others)
     [373]  Elster/Honeywell R2S/REXU power meter, type-2 frames
+    [374]  LaCrosse WS6868 TX232TH-LCD temperature/humidity sensor
+    [375]  LaCrosse WS6868 TX231RW wind/rain sensor
+    [376]  McPower Kinetic battery-less wall switch
 
 * Disabled by default, use -R n or a conf file to enable
 
@@ -515,11 +518,6 @@ where:
 	FSK_PCM :         FSK Pulse Code Modulation
 	FSK_PWM :         FSK Pulse Width Modulation
 	FSK_MC_ZEROBIT :  Manchester Code with fixed leading zero bit
-	FSK_PPM :         FSK Pulse Position Modulation
-	FSK_DMC :         FSK Differential Manchester Code
-	FSK_PIWM_RAW :    FSK Raw Pulse Interval and Width Modulation
-	FSK_PIWM_DC :     FSK Differential Pulse Interval and Width Modulation
-	FSK_MC_OSV1 :     FSK Manchester Code for OSv1 devices
 <short>, <long>, <sync> are nominal modulation timings in us,
 <reset>, <gap>, <tolerance> are maximum modulation timings in us:
 PCM/RZ  short: Nominal width of pulse [us]
