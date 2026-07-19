@@ -16,6 +16,7 @@ Wireless M-Bus protocol. Will return a data string (including the CI byte)
 for further processing by an Application layer (outside this program).
 */
 #include "decoder.h"
+#include <math.h>
 
 #define BLOCK1A_SIZE 12     // Size of Block 1, format A
 #define BLOCK1B_SIZE 10     // Size of Block 1, format B
@@ -488,9 +489,17 @@ static int m_bus_decode_val(const uint8_t *b, uint8_t dif_coding, int64_t *out_v
             }
             *out_value = (int64_t)val;
             return 6;
-        case 5: // 32bit float
-            *out_value = 0; // TODO
-            return -1;
+        case 5: { // 32bit float, IEEE-754 single precision, little-endian
+            uint32_t bits = (uint32_t)b[0] | (uint32_t)b[1] << 8 | (uint32_t)b[2] << 16 | (uint32_t)b[3] << 24;
+            float f;
+            memcpy(&f, &bits, sizeof(f));
+            // Same convention as every other coding here: out_value carries
+            // the raw numeric magnitude, and the caller's VIF-derived
+            // exponent scales it from there -- so round to the nearest
+            // integer rather than trying to guess/cancel that scale here.
+            *out_value = (int64_t)llround((double)f);
+            return 4;
+        }
         case 4: // 32bit
             *out_value = (int32_t)(b[3] << 24 | b[2] << 16 | b[1] << 8 | b[0]);
             return 4;
@@ -859,16 +868,59 @@ static void parse_payload(data_t *data, const m_bus_block1_t *block1, const m_bu
     }
 }
 
+// CI=0x72: long data header, CI=0x7a: short data header, CI=0x78: no data header.
+// A short header contains: Access number (1 byte), Status (1 byte), Configuration (2 bytes)
+// A long data header contains the secondary address of the meter in addition to all the fields of the short header.
+// Long header for CI-fields 0x5B, 0x60, 0x64, 0x6C, 0x6D, 0x72, 0x7C, 0x7E, 0x80 and 0x8B.
+// Short header for CI-fields 0x5A, 0x61, 0x65, 0x7A, 0x7D, 0x7F and 0x8A.
+//
+// `b` must point at the CI byte. `pl_base` is added to the resulting
+// pl_offset so callers can express it relative to their own buffer origin
+// (a wireless M-Bus block1, or any other transport wrapping a plain CI
+// frame, e.g. a wired M-Bus telegram embedded in RADIAN's payload).
+static void m_bus_parse_ci(const uint8_t *b, unsigned pl_base, m_bus_block2_t *b2)
+{
+    b2->CI = b[0];
+    /* Short transport layer */
+    if (b2->CI == 0x7A) {
+        b2->AC = b[1];
+        b2->ST = b[2];
+        b2->CW = b[4]<<8 | b[3];
+        b2->pl_offset = pl_base + 5;
+    }
+    /* Long transport layer: short header fields plus an 8-byte
+       secondary address (ID, Manufacturer, Version, Medium) first. */
+    else if (b2->CI == 0x72) {
+        b2->AC = b[9];
+        b2->ST = b[10];
+        b2->CW = b[12]<<8 | b[11];
+        b2->pl_offset = pl_base + 13;
+    }
+
+    // QDS walk_by
+    // 000: CI:0x78   (no data header, not used by OMS)
+    // 001: DIF:0x0D  (variable length Instantaneous value)
+    // 002: VIF:0xFF  (Manufacturer specific)
+    // 003: VIFE:0x5F (Manufacturer specific VIFE)
+    // 004: LVAR:0x35 (53 bytes Length of walk_by field
+    // 005: 0x00 ST:0 Status 0= No Error
+    // 006: 0x82 unknown (maybe ST MSB),  0x8210 -> "Battery Voltage Low"
+    // 007: AC AccessNumber, inc by 1 each message
+    // 008: 0x0000 CW:0 no encryption
+    if (b2->CI == 0x78 && b[1] == 0x0d && b[2] == 0xff && b[3] == 0x5f && b[4] == 0x35) {
+        b2->AC          = b[7];
+        b2->ST          = b[5];
+        b2->CW          = (b[9] << 8) | (b[8]);
+        b2->pl_offset   = pl_base + 1;
+        b2->qds_walk_by = 1;
+    }
+//    fprintf(stderr, "Instantaneous Value: %02x%02x : %f\n",b[9],b[10],((b[10]<<8)|b[9])*0.01);
+}
+
 static int parse_block2(const m_bus_data_t *in, m_bus_block1_t *block1)
 {
     m_bus_block2_t *b2 = &block1->block2;
     const uint8_t *b = in->data+BLOCK1A_SIZE;
-
-    // CI=0x72: long data header, CI=0x7a: short data header, CI=0x78: no data header.
-    // A short header contains: Access number (1 byte), Status (1 byte), Configuration (2 bytes)
-    // A long data header contains the secondary address of the meter in addition to all the fields of the short header.
-    // Long header for CI-fields 0x5B, 0x60, 0x64, 0x6C, 0x6D, 0x72, 0x7C, 0x7E, 0x80 and 0x8B.
-    // Short header for CI-fields 0x5A, 0x61, 0x65, 0x7A, 0x7D, 0x7F and 0x8A.
 
     if (block1->knx_mode) {
         b2->knx_ctrl = b[0];
@@ -879,41 +931,7 @@ static int parse_block2(const m_bus_data_t *in, m_bus_block1_t *block1)
         b2->apci = b[7];
         /* data */
     } else {
-        b2->CI = b[0];
-        /* Short transport layer */
-        if (b2->CI == 0x7A) {
-            b2->AC = b[1];
-            b2->ST = b[2];
-            b2->CW = b[4]<<8 | b[3];
-            b2->pl_offset = BLOCK1A_SIZE-2 + 5;
-        }
-        /* Long transport layer: short header fields plus an 8-byte
-           secondary address (ID, Manufacturer, Version, Medium) first. */
-        else if (b2->CI == 0x72) {
-            b2->AC = b[9];
-            b2->ST = b[10];
-            b2->CW = b[12]<<8 | b[11];
-            b2->pl_offset = BLOCK1A_SIZE-2 + 13;
-        }
-
-        // QDS walk_by
-        // 000: CI:0x78   (no data header, not used by OMS)
-        // 001: DIF:0x0D  (variable length Instantaneous value)
-        // 002: VIF:0xFF  (Manufacturer specific)
-        // 003: VIFE:0x5F (Manufacturer specific VIFE)
-        // 004: LVAR:0x35 (53 bytes Length of walk_by field
-        // 005: 0x00 ST:0 Status 0= No Error
-        // 006: 0x82 unknown (maybe ST MSB),  0x8210 -> "Battery Voltage Low"
-        // 007: AC AccessNumber, inc by 1 each message
-        // 008: 0x0000 CW:0 no encryption
-        if (b2->CI == 0x78 && b[1] == 0x0d && b[2] == 0xff && b[3] == 0x5f && b[4] == 0x35) {
-            b2->AC          = b[7];
-            b2->ST          = b[5];
-            b2->CW          = (b[9] << 8) | (b[8]);
-            b2->pl_offset   = BLOCK1A_SIZE - 2 + 1;
-            b2->qds_walk_by = 1;
-        }
-    //    fprintf(stderr, "Instantaneous Value: %02x%02x : %f\n",b[9],b[10],((b[10]<<8)|b[9])*0.01);
+        m_bus_parse_ci(b, BLOCK1A_SIZE-2, b2);
     }
     return 0;
 }
@@ -1413,4 +1431,299 @@ r_device const m_bus_mode_f = {
         .reset_limit = 5000,           // ??
         .decode_fn   = &m_bus_mode_f_callback,
         .disabled    = 1, // Disable per default, as it runs on non-standard frequency
+};
+
+#define RADIAN_MAX_FRAME_BYTES 256
+#define RADIAN_MIN_FRAME_BYTES 6
+
+static char const *radian_control_string(uint8_t control)
+{
+    switch (control) {
+    case 0x06:
+        return "ack";
+    case 0x10:
+        return "request";
+    case 0x11:
+        return "response";
+    default:
+        return "unknown";
+    }
+}
+
+static void radian_hex(char *dst, size_t dst_len, uint8_t const *src, unsigned src_len)
+{
+    unsigned pos = 0;
+
+    if (!dst_len)
+        return;
+
+    dst[0] = '\0';
+
+    for (unsigned i = 0; i < src_len && pos + 3 <= dst_len; ++i) {
+        pos += snprintf(&dst[pos], dst_len - pos, "%02x", src[i]);
+    }
+}
+
+// RADIAN's payload wraps a complete wired M-Bus (EN 13757-2) telegram:
+// START(0x68) L L START(0x68) C A CI ... user data ... checksum STOP(0x16).
+// Find it by its self-verifying markers (repeated length, matching checksum,
+// stop byte) rather than assuming a fixed offset, and hand back a pointer to
+// the C byte plus the declared length (covering C, A, CI and user data, not
+// the wired-frame checksum/stop).
+static uint8_t const *radian_find_wmbus_frame(uint8_t const *body, unsigned body_len, unsigned *out_len)
+{
+    for (unsigned i = 0; i + 4 <= body_len; ++i) {
+        if (body[i] != 0x68 || body[i + 3] != 0x68 || body[i + 1] != body[i + 2])
+            continue;
+
+        unsigned wlen = body[i + 1];
+        if (i + 4 + wlen + 2 > body_len)
+            continue; // declared length runs past the body, not a real match
+
+        uint8_t const *c_frame = &body[i + 4];
+        uint8_t checksum       = 0;
+        for (unsigned j = 0; j < wlen; ++j)
+            checksum += c_frame[j];
+
+        if (checksum != c_frame[wlen] || c_frame[wlen + 1] != 0x16)
+            continue; // checksum or stop byte mismatch, not a real match
+
+        *out_len = wlen;
+        return c_frame;
+    }
+    return NULL;
+}
+
+static int radian_decode_row(r_device *decoder, bitbuffer_t *bitbuffer, unsigned row)
+{
+    // Sync tail seen in the #3408 sample: low bits followed by high idle bits.
+    // Start decoding after this and let extract_bytes_uart_8n2() skip leading
+    // idle 1 bits until the first UART start bit.
+    static uint8_t const sync_tail[] = {0x0f, 0xff, 0xff, 0xff, 0xf0}; // {36}0x0ffffffff
+
+    uint8_t frame[RADIAN_MAX_FRAME_BYTES] = {0};
+    unsigned row_bits = bitbuffer->bits_per_row[row];
+    unsigned pos      = bitbuffer_search(bitbuffer, row, 0, sync_tail, 36);
+
+    if (pos >= row_bits) {
+        decoder_log(decoder, 2, __func__, "RADIAN sync tail not found");
+        return DECODE_ABORT_EARLY;
+    }
+
+    pos += 36;
+    if (pos >= row_bits) {
+        decoder_log(decoder, 2, __func__, "RADIAN row ends at sync tail");
+        return DECODE_ABORT_LENGTH;
+    }
+
+    unsigned avail_bits = row_bits - pos;
+    unsigned max_bits   = MIN(avail_bits, RADIAN_MAX_FRAME_BYTES * 11);
+    unsigned frame_len  = extract_bytes_uart_8n2(bitbuffer->bb[row], pos, max_bits, frame);
+
+    if (frame_len < RADIAN_MIN_FRAME_BYTES) {
+        decoder_logf(decoder, 2, __func__, "UART decode too short: %u bytes", frame_len);
+        return DECODE_ABORT_LENGTH;
+    }
+
+    unsigned declared_len = frame[0];
+    if (declared_len < RADIAN_MIN_FRAME_BYTES || declared_len > RADIAN_MAX_FRAME_BYTES) {
+        decoder_logf(decoder, 2, __func__, "Bad RADIAN length byte: %u", declared_len);
+        return DECODE_FAIL_SANITY;
+    }
+
+    if (frame_len < declared_len) {
+        decoder_logf(decoder, 2, __func__, "UART decode truncated: got %u need %u", frame_len, declared_len);
+        return DECODE_ABORT_LENGTH;
+    }
+
+    uint16_t crc_rx   = (uint16_t)frame[declared_len - 2] | (uint16_t)frame[declared_len - 1] << 8;
+    uint16_t crc_calc = crc16lsb(frame, declared_len - 2, 0x8408, 0x0000);
+
+    if (crc_calc != crc_rx) {
+        decoder_logf(decoder, 2, __func__, "CRC fail: calc=%04x rx=%04x", crc_calc, crc_rx);
+        return DECODE_FAIL_MIC;
+    }
+
+    uint8_t control = frame[1];
+
+    // Variant A described in the recovered notes uses zero spacers:
+    //   L C 00 rx[5] 00 tx[5] 00 body crc
+    // The #3408 RADIAN0 sample does not match those spacer positions, so
+    // default to the observed compact variant:
+    //   L C rx[5] tx[5] body crc
+    unsigned addr_off   = 2;
+    unsigned body_off   = 12;
+    unsigned spaced_hdr = 0;
+
+    if (declared_len >= 18 && frame[2] == 0x00 && frame[8] == 0x00 && frame[14] == 0x00) {
+        addr_off   = 3;
+        body_off   = 15;
+        spaced_hdr = 1;
+    }
+
+    if (body_off + 2 > declared_len) {
+        decoder_logf(decoder, 2, __func__, "Header longer than frame: body_off=%u len=%u", body_off, declared_len);
+        return DECODE_FAIL_SANITY;
+    }
+
+    unsigned body_len = declared_len - body_off - 2;
+
+    char receiver[11];
+    char sender[11];
+    char body[RADIAN_MAX_FRAME_BYTES * 2 + 1];
+    char frame_hex[RADIAN_MAX_FRAME_BYTES * 2 + 1];
+
+    radian_hex(receiver, sizeof(receiver), &frame[addr_off], 5);
+    radian_hex(sender, sizeof(sender), &frame[addr_off + 5 + spaced_hdr], 5);
+    radian_hex(body, sizeof(body), &frame[body_off], body_len);
+    radian_hex(frame_hex, sizeof(frame_hex), frame, declared_len);
+
+    decoder_log_bitrow(decoder, 1, __func__, frame, declared_len * 8, "UART decoded frame");
+
+    /* clang-format off */
+    data_t *data = data_make(
+            "model",          "",                DATA_STRING, "RADIAN",
+            "len",            "Length",          DATA_INT,    declared_len,
+            "control",        "Control",         DATA_FORMAT, "0x%02x", DATA_INT, control,
+            "control_string", "Control type",    DATA_STRING, radian_control_string(control),
+            "header_variant", "Header variant",  DATA_STRING, spaced_hdr ? "spaced" : "compact",
+            "receiver_id",    "Receiver ID",     DATA_STRING, receiver,
+            "sender_id",      "Sender ID",       DATA_STRING, sender,
+            "body_len",       "Body length",     DATA_INT,    body_len,
+            "body",           "Body",            DATA_STRING, body,
+            "crc",            "CRC",             DATA_FORMAT, "0x%04x", DATA_INT, crc_rx,
+            "data",           "Data",            DATA_STRING, frame_hex,
+            NULL);
+    /* clang-format on */
+
+    unsigned wmbus_len;
+    uint8_t const *wmbus = radian_find_wmbus_frame(&frame[body_off], body_len, &wmbus_len);
+    if (wmbus) {
+        m_bus_block1_t block1 = {0};
+        block1.L              = wmbus_len;
+
+        m_bus_data_t wmbus_data = {0};
+        wmbus_data.length       = MIN(wmbus_len, sizeof(wmbus_data.data));
+        memcpy(wmbus_data.data, wmbus, wmbus_data.length);
+
+        m_bus_parse_ci(&wmbus_data.data[2], 2, &block1.block2); // data: C A CI ...
+        if (block1.block2.CI == 0x72 || block1.block2.CI == 0x7A) {
+            parse_payload(data, &block1, &wmbus_data);
+        }
+    }
+
+    data = data_str(data, "mic", "Integrity", NULL, "CRC");
+    decoder_output_data(decoder, data);
+    return 1;
+}
+
+/**
+RADIAN / RADIAN0 meter.
+
+The physical/link layer is based on rtl_433 issue #3408 and the recovered
+RADIAN notes attached there:
+
+- FSK PCM at 2400 baud, nominal symbol width 416 us.
+- Preamble is alternating 0101... followed by a long low/high sync region.
+- Payload is UART 8N2: start=0, 8 data bits LSB-first, no parity, two stops=1.
+- Decoded frame has a length byte at byte 0.
+- Trailer is CRC-16/KERMIT over all bytes except the final two CRC bytes,
+  stored little-endian.
+
+The response body wraps a complete wired M-Bus (EN 13757-2) telegram --
+START(0x68) L L START(0x68) C A CI ... checksum STOP(0x16), found via its
+self-verifying length/checksum/stop-byte markers -- so its CI/AC/ST/CW and
+DIF/DIFE/VIF/VIFE records are decoded by the same code wireless M-Bus uses
+(m_bus_parse_ci(), parse_payload()). The wired-frame addressing
+(manufacturer/ID/version/medium) is reported as raw hex in "body" rather
+than decoded, since it doesn't look like standard BCD and the meaning of
+the RADIAN-specific 4-byte prefix ahead of the wired frame isn't pinned
+down either.
+
+Confirmed on the #3408 sample: software_version, a timedate, 19
+storage-numbered H.C.A. units records, two flow/external temperatures,
+two dates, and an energy field all decode correctly, including a
+32-bit float record among them (rounded to the nearest integer before
+the caller's usual VIF-derived scaling, same as every other coding).
+
+@sa m_bus_parse_ci() parse_payload()
+
+Known flex equivalent for the #3408 sample:
+
+    rtl_433 -R 0 -X 'n=RADIAN,m=FSK_PCM,s=416,l=416,r=20000,preamble={36}0x0ffffffff,decode_uart=8n2'
+*/
+static int radian_decode(r_device *decoder, bitbuffer_t *bitbuffer)
+{
+    int events = 0;
+    int aborts = 0;
+    int fails = 0;
+
+    for (unsigned row = 0; row < bitbuffer->num_rows; ++row) {
+        // Need enough bits for sync tail plus a minimum UART frame.
+        if (bitbuffer->bits_per_row[row] < 36 + RADIAN_MIN_FRAME_BYTES * 11) {
+            ++aborts;
+            continue;
+        }
+
+        int ret = radian_decode_row(decoder, bitbuffer, row);
+        if (ret > 0) {
+            events += ret;
+        }
+        else if (ret == DECODE_FAIL_MIC || ret == DECODE_FAIL_SANITY) {
+            ++fails;
+        }
+        else {
+            ++aborts;
+        }
+    }
+
+    if (events)
+        return events;
+    if (fails)
+        return DECODE_FAIL_MIC;
+    if (aborts)
+        return DECODE_ABORT_EARLY;
+    return DECODE_ABORT_LENGTH;
+}
+
+// NOTE: same caveat as m_bus's own output_fields -- storage-numbered DIF
+// records (e.g. "inst_hca_0") produce dynamic key names not listed here,
+// so CSV output will drop them; JSON output is unaffected.
+static char const *const radian_output_fields[] = {
+        "model",
+        "len",
+        "control",
+        "control_string",
+        "header_variant",
+        "receiver_id",
+        "sender_id",
+        "body_len",
+        "body",
+        "crc",
+        "mic",
+        "data",
+        "model_version",
+        "hardware_version",
+        "firmware_version",
+        "software_version",
+        "temperature_C",
+        "average_temperature_1h_C",
+        "average_temperature_24h_C",
+        "humidity",
+        "average_humidity_1h",
+        "average_humidity_24h",
+        "switch",
+        "counter_0",
+        "counter_1",
+        NULL,
+};
+
+r_device const radian = {
+        .name        = "RADIAN/RADIAN0 meter",
+        .modulation  = FSK_PULSE_PCM,
+        .short_width = 416,
+        .long_width  = 416,
+        .reset_limit = 20000,
+        .decode_fn   = &radian_decode,
+        .fields      = radian_output_fields,
 };
