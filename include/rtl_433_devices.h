@@ -397,6 +397,15 @@
     DECL(cotech_36_9231) \
     DECL(lorawan) \
     DECL(elsys_ers) \
+    DECL(hollarm) \
+    DECL(power_smart) \
+    DECL(feron) \
+    DECL(paradox_magellan) \
+    DECL(gangqi) \
+    DECL(chamberlain_code) \
+    DECL(kinggates_stylo4k) \
+    DECL(ido) \
+    DECL(bresser_3ch_v0) \
     /* Add new decoders here. */
 
 #define DECL(name) extern r_device const name;

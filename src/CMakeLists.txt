@@ -187,6 +187,7 @@ add_library(r_433 STATIC
     devices/cavius.c
     devices/ced7000.c
     devices/celsia_czc1.c
+    devices/chamberlain_code.c
     devices/chamberlain_cwpirc.c
     devices/chrysler_car_remote.c
     devices/chuango.c
@@ -235,6 +236,7 @@ add_library(r_433 STATIC
     devices/esperanza_ews.c
     devices/esun_en2053.c
     devices/eurochron.c
+    devices/feron.c
     devices/fineoffset.c
     devices/fineoffset_wh1050.c
     devices/fineoffset_wh1080.c
@@ -256,6 +258,7 @@ add_library(r_433 STATIC
     devices/fsl_scoreboard.c
     devices/ft004b.c
     devices/funkbus.c
+    devices/gangqi.c
     devices/gasmate_ba1008.c
     devices/ge_coloreffects.c
     devices/geevon.c
@@ -279,6 +282,7 @@ add_library(r_433 STATIC
     devices/hcs361.c
     devices/hcs362.c
     devices/hideki.c
+    devices/hollarm.c
     devices/holman_ws5029.c
     devices/homelead_hg9901.c
     devices/hondaremote.c
@@ -287,6 +291,7 @@ add_library(r_433 STATIC
     devices/honeywell_wdb.c
     devices/ht680.c
     devices/ibis_beacon.c
+    devices/ido.c
     devices/ikea_sparsnas.c
     devices/infactory.c
     devices/inkbird_ith20r.c
@@ -298,6 +303,7 @@ add_library(r_433 STATIC
     devices/kedsum.c
     devices/kerui.c
     devices/kidde_smoke.c
+    devices/kinggates.c
     devices/klimalogg.c
     devices/lacrosse.c
     devices/lacrosse_breezepro.c
@@ -350,8 +356,10 @@ add_library(r_433 STATIC
     devices/oregon_scientific_v1.c
     devices/oregon_scientific_wmr500.c
     devices/oria_wa150km.c
+    devices/paradox_magellan.c
     devices/philips_aj3650.c
     devices/philips_aj7010.c
+    devices/power_smart.c
     devices/proflame2.c
     devices/prologue.c
     devices/proove.c

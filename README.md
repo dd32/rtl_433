@@ -484,6 +484,15 @@ See [CONTRIBUTING.md](./docs/CONTRIBUTING.md).
     [387]  Cotech 36-9231 FT020TL LoRa weather station
     [388]  LoRaWAN 1.0.x generic MAC frame
     [389]  ELSYS ERS Series LoRaWAN sensors
+    [390]* Hollarm alarm system remotes
+    [391]  Power Smart blind remotes
+    [392]* Feron LED light remotes
+    [393]  Paradox Magellan security sensors
+    [394]  GangQi alarm system remotes
+    [395]* Chamberlain / LiftMaster DIP switch remotes
+    [396]* King Gates Stylo 4k gate remotes
+    [397]* iDo 117/111 gate remotes
+    [398]* Bresser Thermo-/Hygro-Sensor 3CH, V0 format
 
 * Disabled by default, use -R n or a conf file to enable
 
