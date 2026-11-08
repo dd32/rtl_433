@@ -158,6 +158,9 @@ void r_init_cfg(r_cfg_t *cfg)
 
     // note: this should be optional
     cfg->demod->pulse_detect = pulse_detect_create();
+    for (unsigned i = 0; i < FSK_PULSE_DETECTOR_COUNT; ++i) {
+        pulse_detect_fsk_init(&cfg->demod->pulse_detect_fsk[i]);
+    }
     // initialize tables
     baseband_init();
 
@@ -606,6 +609,16 @@ void event_occurred_handler(r_cfg_t *cfg, data_t *data)
     data_free(data);
 }
 
+/// Samples since the start of the package a decoder decoded from.
+/// An FSK package can start later than its OOK envelope package, e.g. after a lead-in.
+static unsigned package_start_ago(r_cfg_t const *cfg, r_device const *r_dev)
+{
+    if (r_dev->modulation >= FSK_DEMOD_MIN_VAL) {
+        return cfg->demod->fsk_pulse_data.start_ago;
+    }
+    return cfg->demod->pulse_data.start_ago;
+}
+
 /** Pass the data structure to all output handlers. Frees data afterwards. */
 void log_device_handler(r_device *r_dev, int level, data_t *data)
 {
@@ -614,7 +627,7 @@ void log_device_handler(r_device *r_dev, int level, data_t *data)
     // prepend "time" if requested
     if (cfg->report_time != REPORT_TIME_OFF) {
         char time_str[LOCAL_TIME_BUFLEN];
-        time_pos_str(cfg, cfg->demod->pulse_data.start_ago, time_str);
+        time_pos_str(cfg, package_start_ago(cfg, r_dev), time_str);
         data = data_prepend(data,
                 data_str(NULL, "time", "", NULL, time_str));
     }
@@ -821,7 +834,7 @@ void data_acquired_handler(r_device *r_dev, data_t *data)
     // prepend "time" if requested
     if (cfg->report_time != REPORT_TIME_OFF) {
         char time_str[LOCAL_TIME_BUFLEN];
-        time_pos_str(cfg, cfg->demod->pulse_data.start_ago, time_str);
+        time_pos_str(cfg, package_start_ago(cfg, r_dev), time_str);
         data = data_prepend(data,
                 data_str(NULL, "time", "", NULL, time_str));
     }
