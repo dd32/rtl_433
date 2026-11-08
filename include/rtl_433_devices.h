@@ -394,6 +394,9 @@
     DECL(bresser_garden) \
     DECL(neptune_r900bcd) \
     DECL(olympia_9571) \
+    DECL(cotech_36_9231) \
+    DECL(lorawan) \
+    DECL(elsys_ers) \
     /* Add new decoders here. */
 
 #define DECL(name) extern r_device const name;

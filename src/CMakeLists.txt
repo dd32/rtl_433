@@ -91,6 +91,7 @@ endif()
 # Proper object library type was only introduced with CMake 2.8.8
 add_library(r_433 STATIC
     abuf.c
+    aes.c
     am_analyze.c
     baseband.c
     bit_util.c
@@ -101,11 +102,15 @@ add_library(r_433 STATIC
     data.c
     data_tag.c
     decoder_util.c
+    fft.c
     fileformat.c
     http_server.c
     jsmn.c
     list.c
     logger.c
+    lora.c
+    lora_fm.c
+    lorawan.c
     microtar.c
     mongoose.c
     optparse.c
@@ -192,6 +197,7 @@ add_library(r_433 STATIC
     devices/continental_car_remote.c
     devices/cotech_36_7900.c
     devices/cotech_36_7959.c
+    devices/cotech_36_9231.c
     devices/cotech_ft0203.c
     devices/ctt_life_power_hybrid.c
     devices/current_cost.c
@@ -214,6 +220,7 @@ add_library(r_433 STATIC
     devices/elro_db286a.c
     devices/elsner_solexa.c
     devices/elster_power_meter.c
+    devices/elsys_ers.c
     devices/elv.c
     devices/emax.c
     devices/emontx.c
@@ -306,6 +313,7 @@ add_library(r_433 STATIC
     devices/lacrosse_ws7000.c
     devices/lacrossews.c
     devices/lightwave_rf.c
+    devices/lorawan.c
     devices/m_bus.c
     devices/markisol.c
     devices/marlec_solar.c
