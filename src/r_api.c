@@ -141,21 +141,22 @@ void r_init_cfg(r_cfg_t *cfg)
     list_ensure_size(&cfg->output_handler, 16);
 
     // collect devices list, this should be a module
-    r_device r_devices[] = {
-#define DECL(name) name,
+    // a table of pointers: a table of r_device values would be a ~40 KB stack frame
+    static r_device const *const r_devices[] = {
+#define DECL(name) &name,
             DEVICES
 #undef DECL
     };
 
     cfg->num_r_devices = sizeof(r_devices) / sizeof(*r_devices);
-    for (unsigned i = 0; i < cfg->num_r_devices; i++) {
-        r_devices[i].protocol_num = i + 1;
-    }
-    cfg->devices = malloc(sizeof(r_devices));
+    cfg->devices = malloc(cfg->num_r_devices * sizeof(*cfg->devices));
     if (!cfg->devices)
         FATAL_CALLOC("r_init_cfg()");
 
-    memcpy(cfg->devices, r_devices, sizeof(r_devices));
+    for (unsigned i = 0; i < cfg->num_r_devices; i++) {
+        cfg->devices[i] = *r_devices[i];
+        cfg->devices[i].protocol_num = i + 1;
+    }
 
     cfg->demod = calloc(1, sizeof(*cfg->demod));
     if (!cfg->demod)
@@ -195,6 +196,13 @@ r_cfg_t *r_create_cfg(void)
     r_init_cfg(cfg);
 
     return cfg;
+}
+
+static void silenced_handler(struct mg_connection *nc, int ev, void *ev_data)
+{
+    UNUSED(nc);
+    UNUSED(ev);
+    UNUSED(ev_data);
 }
 
 void r_free_cfg(r_cfg_t *cfg)
@@ -245,6 +253,13 @@ void r_free_cfg(r_cfg_t *cfg)
     free(cfg->devices);
     cfg->devices = NULL;
 
+    // mg_mgr_free() polls once more and closes every connection through its handler, but the state
+    // those handlers use (outputs, the demod, cfg's timer) is freed by now: silence them first
+    if (cfg->mgr) {
+        for (struct mg_connection *nc = mg_next(cfg->mgr, NULL); nc != NULL; nc = mg_next(cfg->mgr, nc)) {
+            nc->handler = silenced_handler;
+        }
+    }
     mg_mgr_free(cfg->mgr);
     free(cfg->mgr);
     cfg->mgr = NULL;
